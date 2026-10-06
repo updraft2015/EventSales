@@ -806,6 +806,16 @@
    認証設定
    ============================================================ */
 
+/* スタッフ共通アカウント（Supabase Auth）。
+   画面の入力は今までと同じ「ID」と「パスワード」。
+   Supabase側のパスワードは「ID(小文字):パスワード」をつないだ文字列で登録する。
+   ※ 移行期間のみ、Supabase側アカウントでログインできない場合は従来の照合でも通す（下の FALLBACK）。 */
+const STAFF_EMAIL = 'staff@eventsalesportal.com';
+/* セッションの保存先。sessionStorage＝タブを閉じたら消える（従来の印と同じ寿命）。
+   admin.html（localStorage・既定キー）とは別のキーにして混ざらないようにする。 */
+const STAFF_STORAGE_KEY = 'esp-staff-auth';
+
+/* --- 移行期間のみ（段階2で削除）: 従来のハッシュ照合 --- */
 const SALT = 'esp-portal-2026-salt-x7k9';
 const EXPECTED_HASH = '2a3af7a188ff5f96d503e59681dc4e9d235698d7f23cfce78be1916f59d920bb';
 const SESSION_KEY = 'esp_auth_v1';
@@ -816,9 +826,33 @@ async function hashCredentials(id, pw) {
   return Array.from(new Uint8Array(buf))
     .map(b => b.toString(16).padStart(2,'0')).join('');
 }
+/* --- ここまで移行期間のみ --- */
 
+function storageGet(k){ try{ return sessionStorage.getItem(k); }catch(e){ return null; } }
+function storageDel(k){ try{ sessionStorage.removeItem(k); }catch(e){} }
+
+function hasStaffSession() {
+  return !!storageGet(STAFF_STORAGE_KEY);
+}
 function isLoggedIn() {
-  return sessionStorage.getItem(SESSION_KEY) === EXPECTED_HASH;
+  return hasStaffSession() || storageGet(SESSION_KEY) === EXPECTED_HASH;
+}
+
+/* Supabase Auth でログインを試す。
+   'ok'   = ログインできた（以後の読込はこのセッションで行う）
+   'bad'  = ID/パスワード違い（Supabaseが資格情報を拒否）
+   'down' = 接続できない・ライブラリが無い等 */
+async function staffSignIn(id, pw) {
+  const sb = getSB();
+  if (!sb) return 'down';
+  try {
+    const { data, error } = await sb.auth.signInWithPassword({ email: STAFF_EMAIL, password: `${id}:${pw}` });
+    if (!error && data && data.session) return 'ok';
+    if (error && error.status === 400) return 'bad';
+    return 'down';
+  } catch (e) {
+    return 'down';
+  }
 }
 
 function showMain() {
@@ -832,7 +866,11 @@ function showLogin() {
 }
 
 function logout() {
-  sessionStorage.removeItem(SESSION_KEY);
+  storageDel(SESSION_KEY);
+  storageDel(STAFF_STORAGE_KEY);
+  const sb = getSB();
+  if (sb) { try { sb.removeAllChannels(); sb.auth.signOut({ scope:'local' }).catch(()=>{}); } catch(e){} }
+  _rtSubbed = false;
   document.getElementById('login-id').value = '';
   document.getElementById('login-pw').value = '';
   showLogin();
@@ -845,9 +883,14 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   const errEl = document.getElementById('login-error');
   errEl.classList.remove('show');
 
+  if (await staffSignIn(id, pw) === 'ok') {
+    showMain();
+    return;
+  }
+  /* 移行期間のみ: Supabase側で通らなければ従来の照合 */
   const hash = await hashCredentials(id, pw);
   if (hash === EXPECTED_HASH) {
-    sessionStorage.setItem(SESSION_KEY, hash);
+    try { sessionStorage.setItem(SESSION_KEY, hash); } catch(e){}
     showMain();
   } else {
     errEl.classList.add('show');
@@ -922,7 +965,15 @@ function getSB(){
   if(_sb) return _sb;
   if(window.supabase && window.SUPABASE_URL && window.SUPABASE_ANON_KEY
      && !/YOUR-PROJECT/.test(window.SUPABASE_URL)){
-    _sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    _sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY, {
+      auth: {
+        storage: window.sessionStorage,
+        storageKey: STAFF_STORAGE_KEY,
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false
+      }
+    });
   }
   return _sb;
 }
