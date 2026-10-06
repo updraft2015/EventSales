@@ -809,24 +809,11 @@
 /* スタッフ共通アカウント（Supabase Auth）。
    画面の入力は今までと同じ「ID」と「パスワード」。
    Supabase側のパスワードは「ID(小文字):パスワード」をつないだ文字列で登録する。
-   ※ 移行期間のみ、Supabase側アカウントでログインできない場合は従来の照合でも通す（下の FALLBACK）。 */
+   照合はSupabase（サーバー側）だけで行う。ページ内に照合用の値は置かない。 */
 const STAFF_EMAIL = 'staff@eventsalesportal.com';
 /* セッションの保存先。sessionStorage＝タブを閉じたら消える（従来の印と同じ寿命）。
    admin.html（localStorage・既定キー）とは別のキーにして混ざらないようにする。 */
 const STAFF_STORAGE_KEY = 'esp-staff-auth';
-
-/* --- 移行期間のみ（段階2で削除）: 従来のハッシュ照合 --- */
-const SALT = 'esp-portal-2026-salt-x7k9';
-const EXPECTED_HASH = '2a3af7a188ff5f96d503e59681dc4e9d235698d7f23cfce78be1916f59d920bb';
-const SESSION_KEY = 'esp_auth_v1';
-
-async function hashCredentials(id, pw) {
-  const data = new TextEncoder().encode(id + ':' + pw + ':' + SALT);
-  const buf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(buf))
-    .map(b => b.toString(16).padStart(2,'0')).join('');
-}
-/* --- ここまで移行期間のみ --- */
 
 function storageGet(k){ try{ return sessionStorage.getItem(k); }catch(e){ return null; } }
 function storageDel(k){ try{ sessionStorage.removeItem(k); }catch(e){} }
@@ -835,7 +822,7 @@ function hasStaffSession() {
   return !!storageGet(STAFF_STORAGE_KEY);
 }
 function isLoggedIn() {
-  return hasStaffSession() || storageGet(SESSION_KEY) === EXPECTED_HASH;
+  return hasStaffSession();
 }
 
 /* Supabase Auth でログインを試す。
@@ -866,7 +853,6 @@ function showLogin() {
 }
 
 function logout() {
-  storageDel(SESSION_KEY);
   storageDel(STAFF_STORAGE_KEY);
   const sb = getSB();
   if (sb) { try { sb.removeAllChannels(); sb.auth.signOut({ scope:'local' }).catch(()=>{}); } catch(e){} }
@@ -883,15 +869,15 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   const errEl = document.getElementById('login-error');
   errEl.classList.remove('show');
 
-  if (await staffSignIn(id, pw) === 'ok') {
+  const r = await staffSignIn(id, pw);
+  if (r === 'ok') {
     showMain();
-    return;
-  }
-  /* 移行期間のみ: Supabase側で通らなければ従来の照合 */
-  const hash = await hashCredentials(id, pw);
-  if (hash === EXPECTED_HASH) {
-    try { sessionStorage.setItem(SESSION_KEY, hash); } catch(e){}
-    showMain();
+  } else if (r === 'down') {
+    /* 照合先に届かない＝ID/パスワードの誤りとは限らない。従来どおり一覧画面側で接続エラーを出す */
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('main-screen').classList.remove('hidden');
+    document.getElementById('count-badge').textContent = LOAD_BADGE.cdn;
+    showLoadMessage(LOAD_MSG.cdn);
   } else {
     errEl.classList.add('show');
     document.getElementById('login-pw').value = '';
@@ -983,6 +969,9 @@ async function fetchJobs(){
   const sb = getSB();
   if(!sb) return { ok:false, reason:'config' };
   try{
+    /* ログインが切れている（更新に失敗した等）なら読まずにログイン画面へ戻す */
+    const { data: sess } = await sb.auth.getSession();
+    if(!sess || !sess.session) return { ok:false, reason:'auth' };
     const { data, error } = await sb.from('event_jobs').select('*')
       .order('sort_order', { ascending:true }).order('id', { ascending:true });
     if(error) return { ok:false, reason:'error' };
@@ -1009,6 +998,7 @@ async function loadJobs(){
   try{
     const r = await fetchJobs();
     if(!r.ok){
+      if(r.reason === 'auth'){ logout(); return; }
       badge.textContent = LOAD_BADGE[r.reason] || '読込エラー';
       showLoadMessage(LOAD_MSG[r.reason] || LOAD_MSG.error);
       return;
