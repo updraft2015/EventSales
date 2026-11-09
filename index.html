@@ -243,6 +243,7 @@
     font-size:32px; font-weight:700;
     color:var(--accent); line-height:1;
   }
+  .job-price-text { font-size:18px; }
   .job-price-unit { font-size:13px; color:var(--muted); font-weight:600; }
   .job-price-label { font-size:10px; color:var(--muted); font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
   .job-row { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:8px; }
@@ -926,6 +927,9 @@ function yen(v){
   if(!Number.isFinite(n)) n = 0;
   return n.toLocaleString();
 }
+/* 単価の表示。文字の単価(price_text)があればそれを優先し、無ければ従来の「¥x/日」 */
+function priceText(j){ return String((j && j.price_text) ?? '').trim(); }
+function priceLabel(j){ return priceText(j) || `¥${yen(j && j.price)}/日`; }
 /* インラインJS（onclick）へ入れる数値。数値でなければ null を書き出す */
 function jsNum(v){
   const n = Number(v);
@@ -1056,8 +1060,9 @@ function renderJobs() {
           <div class="job-store">${esc(j.store)}</div>
           <div class="job-price-wrap">
             <div class="job-price-left">
-              <span class="job-price">¥${esc(yen(j.price))}</span>
-              <span class="job-price-unit">/日</span>
+              ${priceText(j)
+                ? `<span class="job-price job-price-text">${esc(priceText(j))}</span>`
+                : `<span class="job-price">¥${esc(yen(j.price))}</span><span class="job-price-unit">/日</span>`}
             </div>
             <span class="job-price-label">単価</span>
           </div>
@@ -1086,7 +1091,7 @@ function openModal(id) {
     `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:8px;background:rgba(0,0,0,.05);font-size:12px;font-weight:700;color:${esc(c.color)};">${esc(c.emoji)} ${esc(c.label)}</span>
      ${j.tag ? `<span style="margin-left:6px;background:rgba(192,25,26,.1);color:var(--accent);font-size:11px;font-weight:700;padding:3px 10px;border-radius:100px;">★ ${esc(j.tag)}</span>` : ''}`;
   document.getElementById('modal-price').innerHTML =
-    `¥${esc(yen(j.price))}<span>/日</span>`;
+    priceText(j) ? esc(priceText(j)) : `¥${esc(yen(j.price))}<span>/日</span>`;
   document.getElementById('modal-grid').innerHTML = `
     <div class="modal-item"><label>日程</label><div class="val">${esc(j.dates)}</div></div>
     <div class="modal-item"><label>ポジション</label><div class="val">${esc(j.position)} ${esc(j.count)}名</div></div>
@@ -1097,7 +1102,7 @@ function openModal(id) {
 
   /* LINE本文はURLエンコードされるためHTMLエスケープは不要。NULLの "null" 混入だけ防ぐ */
   const msg = encodeURIComponent(
-    `【案件応募】\n${j.store ?? ''}(${j.station ?? ''})\n${j.dates ?? ''}\n${j.position ?? ''}\n¥${yen(j.price)}/日・${j.transport ?? ''}${j.lodging ? ' / ' + j.lodging : ''}\n\n上記案件に応募します。`
+    `【案件応募】\n${j.store ?? ''}(${j.station ?? ''})\n${j.dates ?? ''}\n${j.position ?? ''}\n${priceLabel(j)}・${j.transport ?? ''}${j.lodging ? ' / ' + j.lodging : ''}\n\n上記案件に応募します。`
   );
   document.getElementById('modal-line-btn').href =
     `https://line.me/R/oaMessage/%40597ckygq/?${msg}`;

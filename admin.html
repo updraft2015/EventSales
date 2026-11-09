@@ -308,7 +308,7 @@ function enterApp(){
 /* ===================== 読込 ===================== */
 function mapRow(r){
   return { id:r.id, carrier:r.carrier||'docomo', station:r.station||'', store:r.store||'',
-    price:Number(r.price)||0, dates:r.dates||'', transport:r.transport||'', lodging:r.lodging||'',
+    price:Number(r.price)||0, price_text:r.price_text||'', dates:r.dates||'', transport:r.transport||'', lodging:r.lodging||'',
     position:r.position||'クローザー', count:Number(r.count)||1, tag:r.tag||'', note:r.note||'',
     status:r.status||'', sort_order:Number(r.sort_order)||0, _new:false, _dirty:false, _tmp:'t'+(tmpSeq++) };
 }
@@ -373,7 +373,8 @@ const NO_ROW_MSG = '対象が見つかりません（他の端末で削除され
 function payload(j){
   // count/price の正規化は入力時（normInt）に一本化。ここで 0→1 に戻すと画面0名／DB1名の食い違いが出る
   return { carrier:j.carrier, station:j.station, store:j.store, price:Number(j.price)||0,
-    dates:j.dates, transport:j.transport, lodging:j.lodging, position:j.position,
+    price_text:j.price_text||'',
+    dates:j.dates, transport:j.transport, lodging:j.lodging, position:(j.position||'').trim()||'クローザー',
     count:Number(j.count)||0, tag:j.tag, note:j.note, status:j.status };
 }
 /* 成功なら true / 失敗なら false を返す（saveAllNew が成否を数えるため） */
@@ -680,10 +681,10 @@ function jobCard(j){
       <div class="cell"><label>キャリア</label>
         <select class="input" data-tmp="${t}" data-k="carrier">${carrierList(j).map(c=>opt(j,'carrier',c.v,c.emoji+' '+c.label)).join('')}</select></div>
       <div class="cell"><label>ポジション</label>
-        <select class="input" data-tmp="${t}" data-k="position">${['クローザー','キャッチャー','ラウンダー'].map(p=>opt(j,'position',p,p)).join('')}</select></div>
+        <input class="input" data-tmp="${t}" data-k="position" list="pos-list" value="${esc(j.position)}" placeholder="クローザー など"></div>
       <div class="cell"><label>最寄駅</label><input class="input" data-tmp="${t}" data-k="station" value="${esc(j.station)}"></div>
       <div class="cell"><label>店舗 / 会場</label><input class="input" data-tmp="${t}" data-k="store" value="${esc(j.store)}"></div>
-      <div class="cell"><label>単価(円)</label><input class="input" data-tmp="${t}" data-k="price" inputmode="numeric" value="${esc(j.price)}"></div>
+      <div class="cell"><label>単価</label><input class="input" data-tmp="${t}" data-k="price" value="${esc(j.price_text||j.price)}" placeholder="15000 / 月給30万円 など"></div>
       <div class="cell"><label>人数</label><input class="input" data-tmp="${t}" data-k="count" inputmode="numeric" value="${esc(j.count)}"></div>
       <div class="cell full"><label>日程</label><input class="input" data-tmp="${t}" data-k="dates" value="${esc(j.dates)}"></div>
       <div class="cell"><label>交通費</label><input class="input" data-tmp="${t}" data-k="transport" value="${esc(j.transport)}" placeholder="交通費込み / 別"></div>
@@ -725,7 +726,7 @@ $('#parse-btn').addEventListener('click', ()=>{
   $('#paste').value='';
 });
 $('#addempty-btn').addEventListener('click', ()=>{
-  jobs.push({ id:null, carrier:'docomo', station:'', store:'', price:0, dates:'', transport:'交通費込み',
+  jobs.push({ id:null, carrier:'docomo', station:'', store:'', price:0, price_text:'', dates:'', transport:'交通費込み',
     lodging:'', position:'クローザー', count:1, tag:'', note:'', status:'', sort_order:nextSort(),
     _new:true, _dirty:false, _tmp:'t'+(tmpSeq++) });
   render();
@@ -735,6 +736,13 @@ $('#clearpaste-btn').addEventListener('click', ()=>{ $('#paste').value=''; });
 
 /* 数値欄の正規化はここ1箇所。全角「２７０００」を先に半角化してから数字だけ取る
    （z2h を通さないと ¥0 のまま公開されていた）。payload 側で 0→1 に戻さないこと */
+/* 単価欄: 数字だけ（¥・円・カンマ・空白は無視）なら price に整数で、文字を含むなら price_text に原文のまま入れる */
+function setPrice(j, v){
+  const raw = String(v==null?'':v).trim();
+  const bare = z2h(raw).replace(/[¥￥円,、\s]/g,'');
+  if(bare==='' || /^\d+$/.test(bare)){ j.price = bare===''?0:Number(bare); j.price_text = ''; }
+  else { j.price = 0; j.price_text = raw; }
+}
 function normInt(v){
   const n = Number(z2h(String(v==null?'':v)).replace(/[^\d]/g,''));
   return Number.isFinite(n) ? n : 0;
@@ -742,7 +750,8 @@ function normInt(v){
 $('#cards').addEventListener('input', e=>{
   const t=e.target, k=t.dataset.k; if(!k) return;
   const j = jobOf(t); if(!j) return;
-  if(k==='price'||k==='count') j[k] = normInt(t.value);
+  if(k==='price') setPrice(j, t.value);
+  else if(k==='count') j[k] = normInt(t.value);
   else j[k] = t.value;
   if(!j._new) j._dirty = true;
   const card = t.closest('.jc');
@@ -784,5 +793,6 @@ window.addEventListener('beforeunload', e=>{
 /* ===================== 起動 ===================== */
 (async()=>{ if(await hasSession()) enterApp(); })();
 </script>
+<datalist id="pos-list"><option value="クローザー"><option value="キャッチャー"><option value="ラウンダー"></datalist>
 </body>
 </html>
