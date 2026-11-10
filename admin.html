@@ -401,6 +401,8 @@ async function saveJob(j, btn){
       j._dirty=false;
       toast('更新しました（全端末に即時反映）');
     }
+    // 空欄で保存したポジションは payload() で既定値になる。画面も DB と同じ値に揃える
+    j.position = payload(j).position;
     render();
     return true;
   }catch(e){
